@@ -1,88 +1,125 @@
 import sys
-from PyQt5.QtCore import Qt, QUrl
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtMultimediaWidgets import QVideoWidget
+import cv2
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog, \
+    QLabel, QGraphicsView, QGraphicsScene
+from PyQt5.QtCore import Qt, QTimer
 
 
-class VideoUploader(QWidget):
+# 定义主窗口类
+class VideoUploader(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # 设置窗口标题和大小
-        self.setWindowTitle("视频上传器")
-        self.setGeometry(200, 200, 800, 600)
+        # 设置主窗口标题
+        self.setWindowTitle("视频异常检测系统")
 
-        # 外部布局（主布局）：上下布局
-        main_layout = QVBoxLayout()
+        # 设置主窗口的位置和大小
+        self.setGeometry(100, 100, 1200, 600)  # Adjusted width for more space
 
-        # 上方布局（结果呈现区）：左右布局
-        result_layout = QHBoxLayout()
+        # 创建中心部件
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
 
-        # 创建左侧视频预览区
-        self.video_widget = QVideoWidget(self)
-        result_layout.addWidget(self.video_widget, 3)  # 左侧视频预览区占3/4的空间
+        # 主布局
+        self.main_layout = QVBoxLayout()
+        self.central_widget.setLayout(self.main_layout)
 
-        # 创建右侧检测结果区
-        self.result_label = QLabel("检测结果将在此显示", self)
-        self.result_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.result_label.setWordWrap(True)
-        result_layout.addWidget(self.result_label, 1)  # 右侧结果呈现区占1/4的空间
+        # 顶部布局（分为左右两部分）
+        self.top_layout = QHBoxLayout()
+        self.main_layout.addLayout(self.top_layout)
 
-        # 将上方的结果呈现区添加到主布局
-        main_layout.addLayout(result_layout)
+        # 左侧视频显示区域
+        self.left_video_display = QGraphicsView()
+        self.left_video_scene = QGraphicsScene()
+        self.left_video_display.setScene(self.left_video_scene)
+        self.top_layout.addWidget(self.left_video_display, 1)
 
-        # 下方按钮区（垂直排列按钮）
-        button_layout = QVBoxLayout()
+        # 右侧视频信息显示区域
+        self.right_info_layout = QVBoxLayout()
+        self.video_info_label = QLabel("视频信息:")
+        self.right_info_layout.addWidget(self.video_info_label)
+        self.top_layout.addLayout(self.right_info_layout, 1)
 
-        # 上传视频按钮
+        # 底部按钮布局
+        self.button_layout = QVBoxLayout()
+        self.main_layout.addLayout(self.button_layout)
+
+        # 创建上传视频按钮
         self.upload_button = QPushButton("上传视频")
+
+        # 创建视频检测按钮
+        self.video_button = QPushButton("视频检测")
+
+        # 连接按钮到相应的函数
         self.upload_button.clicked.connect(self.upload_video)
-        button_layout.addWidget(self.upload_button)
+        self.video_button.clicked.connect(self.video_frames_deal)
 
-        # 视频检测按钮
-        self.detect_button = QPushButton("视频检测")
-        self.detect_button.clicked.connect(self.detect_video)
-        button_layout.addWidget(self.detect_button)
+        # 将按钮添加到底部布局
+        self.button_layout.addWidget(self.upload_button)
+        self.button_layout.addWidget(self.video_button)
 
-        # 将按钮区添加到主布局
-        main_layout.addLayout(button_layout)
+        # 定时器用于更新左侧视频帧
+        self.timer_left = QTimer()
+        self.timer_left.timeout.connect(self.update_frame_left)
+        self.cap_left = None  # 用于存储视频捕获对象
 
-        # 设置主布局
-        self.setLayout(main_layout)
-
-        # 创建一个媒体播放器对象
-        self.media_player = QMediaPlayer(None, QMediaPlayer.VideoSurface)
-        self.media_player.setVideoOutput(self.video_widget)  # 设置视频输出到 QVideoWidget
-
+    # 上传视频的方法
     def upload_video(self):
-        # 打开文件对话框，选择视频文件
-        video_file, _ = QFileDialog.getOpenFileName(self, "选择视频文件", "", "视频文件 (*.mp4 *.avi *.mkv)")
-        if video_file:
-            # 打印视频文件路径
-            print(f"加载的视频文件路径: {video_file}")
+        # 打开文件对话框选择视频文件
+        file_name, _ = QFileDialog.getOpenFileName(self, "选择视频文件", "", "视频文件 (*.mp4 *.avi *.mov)")
+        print(file_name)
+        if file_name:
+            if self.cap_left:
+                self.cap_left.release()  # 释放之前的视频捕获对象
+            self.cap_left = cv2.VideoCapture(file_name)  # 创建新的视频捕获对象
+            if self.cap_left.isOpened():
+                self.timer_left.start(30)  # 每30毫秒更新一次帧
 
-            # 设置播放器的媒体内容为选择的视频文件
-            media = QMediaContent(QUrl.fromLocalFile(video_file))
-            self.media_player.setMedia(media)
+    # 视频检测的方法
+    def video_frames_deal(self):
+        if self.cap_left and self.cap_left.isOpened():
+            # 获取视频属性
+            fps = int(self.cap_left.get(cv2.CAP_PROP_FPS))
+            total_frames = int(self.cap_left.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(self.cap_left.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(self.cap_left.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-            # 检查视频是否准备好
-            if not self.media_player.isVideoAvailable():
-                print("视频文件无法加载或没有准备好，无法播放。")
-                print(f"错误信息: {self.media_player.errorString()}")
+            # 显示视频信息
+            self.video_info_label.setText(
+                f"视频信息:\n帧率: {fps} FPS\n总帧数: {total_frames}\n分辨率: {width}x{height}\n 第2帧视频模糊\n 第4帧摄像机增益异常、曝光不当")
+        else:
+            self.video_info_label.setText("没有上传视频或视频无法打开")
+
+    # 更新左侧视频帧的方法
+    def update_frame_left(self):
+        if self.cap_left and self.cap_left.isOpened():
+            ret, frame = self.cap_left.read()  # 读取一帧
+            if ret:
+                # 将帧从BGR转换为RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, _ = frame_rgb.shape
+                q_img = QImage(frame_rgb.data, w, h, w * 3, QImage.Format_RGB888)
+
+                # 更新QGraphicsScene中的帧
+                pixmap = QPixmap.fromImage(q_img)
+                self.left_video_scene.clear()
+                self.left_video_scene.addPixmap(pixmap)
+                self.left_video_display.setScene(self.left_video_scene)
+                self.left_video_display.fitInView(self.left_video_scene.sceneRect(), Qt.KeepAspectRatio)
             else:
-                self.media_player.play()
+                self.timer_left.stop()  # 如果没有更多帧，停止定时器
 
-    def detect_video(self):
-        # 假设检测逻辑
-        print("视频检测已启动！")
-        # 在此可以加入视频检测的代码，展示检测结果
-        # 例如：调用其他函数或显示检测信息到界面
-        self.result_label.setText("检测结果：\n\n视频中检测到运动与物体识别结果。")
+    # 关闭事件处理
+    def closeEvent(self, event):
+        if self.cap_left:
+            self.cap_left.release()  # 释放视频捕获对象
+        event.accept()
 
 
+# 主程序入口
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = VideoUploader()
-    window.show()
-    sys.exit(app.exec_())
+    app = QApplication(sys.argv)  # 创建应用程序对象
+    main_window = VideoUploader()  # 创建主窗口实例
+    main_window.show()  # 显示主窗口
+    sys.exit(app.exec_())  # 进入应用程序主循环
